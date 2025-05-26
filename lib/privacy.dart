@@ -30,7 +30,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     speech.stop();
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const SignUpScreen()),
+      MaterialPageRoute(builder: (context) => const SignUpPage()),
     );
   }
 
@@ -115,7 +115,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     } else if (command.contains("skip")) {
       _waitingForSkipConfirmation = true;
       await speakAndWait(
-          "Are you sure you want to skip reading the privacy policy?");
+          "By skipping, you automatically agree to our policy terms. Do you still want to skip? Please say yes or no.");
       _startListening();
     } else {
       await speakAndWait(

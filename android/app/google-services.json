@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "879410247660",
-    "project_id": "vissionassist-7edce",
-    "storage_bucket": "vissionassist-7edce.firebasestorage.app"
+    "project_number": "281720318679",
+    "project_id": "visionassist-bcaca",
+    "storage_bucket": "visionassist-bcaca.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:879410247660:android:101f32127f4e8ceb6ff2c9",
+        "mobilesdk_app_id": "1:281720318679:android:a5d09bea62668e9a445e92",
         "android_client_info": {
-          "package_name": "com.example.test1"
+          "package_name": "com.example.visionassist"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBFvC5DKOuKlrUPo-QWg3UGNHjORiZFZpY"
+          "current_key": "AIzaSyA4M-t7Wz50rb_DCxNC1lNageN6Jz101RU"
         }
       ],
       "services": {

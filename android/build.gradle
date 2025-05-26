@@ -1,12 +1,20 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.4.2' // Required Android Gradle plugin
+        classpath 'com.google.gms:google-services:4.4.2' // Firebase/Google services plugin
+    }
+}
+
 allprojects {
     repositories {
         google()
         mavenCentral()
     }
-}
-
-dependencies{
-    classpath 'com.google.gms.google-services' version '4.4.2' 
 }
 
 rootProject.buildDir = "../build"
