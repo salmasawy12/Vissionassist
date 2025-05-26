@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "879410247660",
+    "project_id": "vissionassist-7edce",
+    "storage_bucket": "vissionassist-7edce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:879410247660:android:101f32127f4e8ceb6ff2c9",
+        "android_client_info": {
+          "package_name": "com.example.test1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFvC5DKOuKlrUPo-QWg3UGNHjORiZFZpY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

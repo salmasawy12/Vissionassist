@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:test1/signup.dart';
+import 'package:test1/getstarted.dart';
 import 'package:test1/terms.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
@@ -223,19 +223,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                           MaterialPageRoute(
                               builder: (context) =>
                                   const TermsOfServiceScreen()),
-                        );
-                      },
-                    ),
-
-                    const SizedBox(height: 12),
-                    _linkButton(
-                      context,
-                      "Privacy Policy",
-                      () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => const PrivacyScreen()),
                         );
                       },
                     ),

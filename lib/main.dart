@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter/services.dart';
 import 'package:test1/home.dart';
-import 'package:test1/login.dart';
+import 'package:test1/welcome.dart';
 import 'package:test1/signup.dart'; // Important for binding initialization
 // import 'package:gradproj/home.dart';
 // import 'package:gradproj/login.dart';
