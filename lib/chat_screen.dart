@@ -6,6 +6,12 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:intl/intl.dart'; // For formatting timestamps
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:io';
+import 'package:flutter/services.dart';
 
 class ChatScreen extends StatefulWidget {
   final String username;
@@ -18,6 +24,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final List<Map<String, dynamic>> messages = [];
   final TextEditingController messageController = TextEditingController();
+  static const platform = MethodChannel('com.example.volume_button');
   final ImagePicker _picker = ImagePicker();
   late stt.SpeechToText _speech;
   bool _isListening = false;
@@ -34,20 +41,90 @@ class _ChatScreenState extends State<ChatScreen> {
     _speech = stt.SpeechToText();
     _flutterTts.setLanguage("en-US");
     _flutterTts.setSpeechRate(0.5);
+    _loadMessages();
+    platform.setMethodCallHandler((call) async {
+      if (call.method == "volumeUpPressed") {
+        print("Volume up detected from native code");
+        if (!_isListening && !_isResponding) {
+          startListening();
+        }
+      }
+    });
   }
 
-  void sendMessage(String text) {
-    if (text.isNotEmpty) {
-      setState(() {
+  void _loadMessages() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Users')
+        .doc(user.uid)
+        .collection('chats')
+        .doc(widget.username)
+        .collection('messages')
+        .orderBy('timestamp')
+        .get();
+
+    setState(() {
+      messages.clear();
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
         messages.add({
-          'type': 'text',
-          'content': text,
-          'isUser': true,
-          'timestamp': DateTime.now(),
+          'type': data['type'],
+          'content': data['content'],
+          'isUser': data['isUser'],
+          'timestamp': (data['timestamp'] as Timestamp).toDate(),
         });
-      });
-      _speak("Message sent.");
-    }
+      }
+    });
+  }
+
+  void sendMessage(String text) async {
+    if (text.isEmpty) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final senderId = user.uid;
+    final receiverId =
+        widget.username; // assume this is receiver's user ID or unique username
+
+    final message = {
+      'type': 'text',
+      'content': text,
+      'isUser': true,
+      'timestamp': Timestamp.now(),
+      'senderId': senderId,
+      'receiverId': receiverId,
+    };
+
+    setState(() {
+      messages.add(message);
+    });
+
+    // Save to sender's chat collection
+    await FirebaseFirestore.instance
+        .collection('Users')
+        .doc(senderId)
+        .collection('chats')
+        .doc(receiverId)
+        .collection('messages')
+        .add(message);
+
+    // Update last message metadata for sender
+    await FirebaseFirestore.instance
+        .collection('Users')
+        .doc(senderId)
+        .collection('chats')
+        .doc(receiverId)
+        .set({
+      'lastMessage': text,
+      'timestamp': Timestamp.now(),
+      'receiverId': receiverId,
+    }, SetOptions(merge: true));
+
+    _speak("Message sent.");
+
     messageController.clear();
     _waitingForMessage = false;
   }
@@ -103,11 +180,12 @@ class _ChatScreenState extends State<ChatScreen> {
       sendMessage(spokenText);
       return;
     }
-    // if (spokenText.contains("send picture")) {
-    //   _speak("Please take a picture.");
-    //   _takeAndSendPicture();
-    //   return;
-    // }
+    if (spokenText.contains("send picture")) {
+      _speak("Please take a picture.").then((_) {
+        _takeAndSendPicture();
+      });
+      return;
+    }
 
     if (spokenText.contains("read last message")) {
       readLastMessage();
@@ -130,11 +208,79 @@ class _ChatScreenState extends State<ChatScreen> {
         "Command not recognized. Try saying 'Send message' or 'Read last message'.");
   }
 
-  void _speak(String text) async {
+  Future<void> _speak(String text) async {
     _isResponding = true;
     await _flutterTts.speak(text);
-    await Future.delayed(Duration(seconds: 2));
+    await Future.delayed(Duration(seconds: 2)); // Optional
     _isResponding = false;
+  }
+
+  Future<void> _takeAndSendPicture() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final status = await Permission.camera.status;
+
+    if (status.isDenied || status.isPermanentlyDenied) {
+      final result = await Permission.camera.request();
+
+      if (!result.isGranted) {
+        _speak(
+            "Camera permission denied. Please enable it in your phone settings.");
+        openAppSettings(); // Open app settings for the user
+        return;
+      }
+    }
+
+    final pickedFile = await _picker.pickImage(source: ImageSource.camera);
+    if (pickedFile == null) {
+      _speak("No image captured.");
+      return;
+    }
+
+    _speak("Sending picture...");
+
+    try {
+      final imageBytes = await pickedFile.readAsBytes();
+      final base64Image = base64Encode(imageBytes);
+
+      final message = {
+        'type': 'image',
+        'content': base64Image,
+        'isUser': true,
+        'timestamp': Timestamp.now(),
+      };
+
+      setState(() {
+        messages.add({
+          ...message,
+          'timestamp': DateTime.now(),
+        });
+      });
+
+      await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .collection('chats')
+          .doc(widget.username)
+          .collection('messages')
+          .add(message);
+
+      await FirebaseFirestore.instance
+          .collection('Users')
+          .doc(user.uid)
+          .collection('chats')
+          .doc(widget.username)
+          .set({
+        'lastMessage': "[Image]",
+        'timestamp': Timestamp.now(),
+      }, SetOptions(merge: true));
+
+      _speak("Picture sent.");
+    } catch (e) {
+      _speak("Failed to send image.");
+      print("Encoding error: $e");
+    }
   }
 
   @override
@@ -149,7 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
               itemCount: messages.length,
               itemBuilder: (context, index) {
                 final message = messages[index];
-                final isUser = message['isUser'];
+                final isUser = message['isUser'] ?? false;
                 final isImage = message['type'] ==
                     'image'; // Check if the message is an image
                 return Row(
@@ -181,21 +327,12 @@ class _ChatScreenState extends State<ChatScreen> {
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: isImage
-                                ? kIsWeb
-                                    ? Image.network(
-                                        message[
-                                            'content'], // This is the base64 string for web
-                                        width: 150,
-                                        height: 150,
-                                        fit: BoxFit.cover,
-                                      )
-                                    : Image.file(
-                                        message[
-                                            'content'], // This works for mobile
-                                        width: 150,
-                                        height: 150,
-                                        fit: BoxFit.cover,
-                                      )
+                                ? Image.memory(
+                                    base64Decode(message['content']),
+                                    width: 150,
+                                    height: 150,
+                                    fit: BoxFit.cover,
+                                  )
                                 : Text(
                                     message['content'],
                                     style: TextStyle(
@@ -206,12 +343,11 @@ class _ChatScreenState extends State<ChatScreen> {
                           Padding(
                             padding:
                                 const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Text(
-                              DateFormat('h:mm a').format(
-                                  message['timestamp'] ?? DateTime.now()),
-                              style: TextStyle(
-                                  fontSize: 10, color: Colors.grey[700]),
-                            ),
+                            child: Text(DateFormat('h:mm a').format(
+                              (message['timestamp'] is Timestamp)
+                                  ? (message['timestamp'] as Timestamp).toDate()
+                                  : message['timestamp'] ?? DateTime.now(),
+                            )),
                           ),
                         ],
                       ),
@@ -260,36 +396,8 @@ class _ChatScreenState extends State<ChatScreen> {
           SizedBox(height: 10),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _isListening ? stopListening : startListening,
-        backgroundColor: _isListening ? Colors.red : Color(0xff1370C2),
-        child: Icon(_isListening ? Icons.mic_off : Icons.mic),
-      ),
     );
   }
-
-  // void _takeAndSendPicture() async {
-  //   if (kIsWeb) {
-  //     // If we're on the web, call the updated function
-  //     takeAndSendPictureWeb(
-  //       (imageUrl) {
-  //         setState(() {
-  //           messages.add({
-  //             'type': 'image',
-  //             'content': imageUrl, // Send the image as base64 string
-  //             'isUser': true,
-  //             'timestamp': DateTime.now(),
-  //           });
-  //         });
-  //       },
-  //       (text) {
-  //         _speak(text); // Provide feedback to the user
-  //       },
-  //     );
-  //   } else {
-  //     _speak("Taking pictures is only supported on the web for now.");
-  //   }
-  // }
 
   void _checkAndRequestPermissions() async {
     // Request camera permission

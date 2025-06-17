@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  local_auth: ^2.1.6
+  flutter_secure_storage: ^9.0.0
   flutter:
     sdk: flutter
   permission_handler: ^10.4.0
@@ -37,6 +39,7 @@ dependencies:
   speech_to_text: ^5.5.3
   flutter_tts: ^3.6.2
   carousel_slider: ^5.0.0
+
   image_picker: ^0.8.7+4
   intl: ^0.18.1
 

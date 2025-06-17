@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter/services.dart';
+
 import 'package:test1/getstarted.dart';
 // import 'package:vissionassist/getstarted.dart';
 import 'package:test1/home.dart';
@@ -30,7 +31,7 @@ class MainApp extends StatelessWidget {
       initialRoute: '/login',
       routes: {
         '/login': (context) => Startscreen(),
-        '/signup': (context) => SignUpPage(),
+        // '/signup': (context) => SignUpPage(),
         '/home': (context) => HomeScreen(),
       },
     );

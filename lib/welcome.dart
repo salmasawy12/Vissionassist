@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'privacy.dart';
+import 'package:flutter/services.dart';
 
 class Startscreen extends StatefulWidget {
   @override
@@ -13,8 +14,10 @@ class Startscreen extends StatefulWidget {
 }
 
 class _StartscreenState extends State<Startscreen> {
+  static const volumeChannel = MethodChannel('com.example.volume_button');
   late FlutterTts flutterTts;
   late stt.SpeechToText speech;
+  bool isTtsSpeaking = false;
   bool isListening = false;
   String lastWords = '';
   bool commandHandled = false;
@@ -26,10 +29,53 @@ class _StartscreenState extends State<Startscreen> {
     flutterTts = FlutterTts();
     speech = stt.SpeechToText();
 
+    flutterTts.setStartHandler(() {
+      setState(() {
+        isTtsSpeaking = true;
+      });
+      print("TTS started");
+    });
+
     flutterTts.setCompletionHandler(() {
+      setState(() {
+        isTtsSpeaking = false;
+      });
       print("TTS completed");
-      if (!commandHandled) {
-        _startListening();
+    });
+
+    flutterTts.setCancelHandler(() {
+      setState(() {
+        isTtsSpeaking = false;
+      });
+      print("TTS canceled");
+    });
+
+    flutterTts.setErrorHandler((msg) {
+      setState(() {
+        isTtsSpeaking = false;
+      });
+      print("TTS error: $msg");
+    });
+
+    volumeChannel.setMethodCallHandler((call) async {
+      if (call.method == 'volumeUpPressed') {
+        print('Volume up button pressed');
+        if (isTtsSpeaking) {
+          print('TTS is speaking; mic will not start.');
+          return;
+        }
+
+        if (!isListening) {
+          print("Mic is not listening. Attempting to start...");
+          await speech.stop();
+
+          // ✅ Extra safety delay after TTS finishes
+          Future.delayed(Duration(milliseconds: 500), () {
+            if (!isTtsSpeaking) _startListening();
+          });
+        } else {
+          print("Mic is already listening");
+        }
       }
     });
 
@@ -40,15 +86,24 @@ class _StartscreenState extends State<Startscreen> {
     commandHandled = false; // reset here
     await flutterTts.stop();
     await flutterTts.speak(
-        "Hi, welcome to vision assist. Would you like to proceed to sign up? Please respond with yes or no.");
+        "Hi, welcome to vision assist. Would you like to proceed to sign up? Please respond with proceed or cancel after opening the mic by pressing the volume up button.");
   }
 
   void _startListening() async {
     print('Starting to listen...');
-    commandHandled = false; // <--- reset here as well before listening
+    commandHandled = false; // reset
+
     bool available = await speech.initialize(
       onError: (val) {
         print('Speech error: $val');
+        setState(() => isListening = false);
+      },
+      onStatus: (status) {
+        print('Speech status: $status');
+        if (status == 'notListening') {
+          // mic stopped due to timeout or silence
+          setState(() => isListening = false);
+        }
       },
     );
 
@@ -64,6 +119,10 @@ class _StartscreenState extends State<Startscreen> {
             await _processResult(lastWords);
           }
         },
+        listenMode:
+            stt.ListenMode.confirmation, // or dictation depending on needs
+        pauseFor: Duration(seconds: 3), // how long silence before stop
+        partialResults: false,
       );
     } else {
       print('Speech recognition unavailable');
@@ -81,34 +140,52 @@ class _StartscreenState extends State<Startscreen> {
       return;
     }
 
-    if (recognized.contains('yes') || recognized.contains('proceed')) {
+    if (recognized.contains('proceed')) {
       print('User said yes or proceed');
       commandHandled = true;
-      await speech.stop(); // stop listening before navigation
+      await speech.stop();
       await flutterTts.stop();
-      await flutterTts.speak("Proceeding to sign up.");
-      await Future.delayed(Duration(milliseconds: 500));
+
+      // Start TTS
+      await flutterTts.speak(
+          "Proceeding to sign up. Moving forward, please make sure to open the mic before speaking.");
+
+      // 🟡 Wait until TTS actually starts (isTtsSpeaking = true)
+      while (!isTtsSpeaking) {
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+
+      // 🟢 Now wait for it to finish
+      while (isTtsSpeaking) {
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+
       if (mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => PrivacyScreen()),
         );
       }
-    } else if (recognized.contains('no')) {
+    } else if (recognized.contains('cancel')) {
       print('User said no');
       commandHandled = true;
       await speech.stop();
       await flutterTts.stop();
-      await flutterTts.speak("Okay, please take your time.");
-      await Future.delayed(Duration(seconds: 10));
-      await _speakWelcome();
+      await flutterTts.speak(
+          "No problem, please take your time and switch the mic back on to say proceed when you are ready.");
     } else {
       print('Unrecognized command: retry prompt');
+      commandHandled = false; // allow reprocessing
+      await speech.stop(); // stop mic if it's running
       await flutterTts.stop();
-      commandHandled = false; // reset so retry works
-      await flutterTts
-          .speak("Sorry, I didn't catch that. Please say yes or no.");
-      // After speech completes, TTS completion handler will call _startListening()
+
+      await flutterTts.speak(
+          "Sorry, I didn't catch that. Please press the volume up button again to try.");
+
+      // Important: Reset listening flag so mic can be restarted on button press
+      setState(() {
+        isListening = false;
+      });
     }
   }
 
@@ -208,13 +285,6 @@ class _StartscreenState extends State<Startscreen> {
             ),
           ),
           SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22.0),
-            child: Text(
-              'Detected command: $lastWords',
-              style: TextStyle(fontSize: 16, color: Colors.black54),
-            ),
-          ),
         ],
       ),
     );
