@@ -119,6 +119,13 @@ class _VolunteerChatScreenState extends State<VolunteerChatScreen> {
 
     final senderId = volunteer.uid;
     final receiverId = widget.receiverUid;
+    print(
+        'DEBUG: sendMessage called with senderId=[32m$senderId[0m, receiverId=[34m$receiverId[0m');
+    if (senderId == receiverId) {
+      print('WARNING: senderId and receiverId are the same! Message not sent.');
+      // Optionally show a dialog or snackbar here
+      return;
+    }
     final timestamp = Timestamp.now();
 
     final message = {

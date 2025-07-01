@@ -162,6 +162,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final senderId = user.uid;
     final receiverId = widget.receiverUid;
+    print(
+        'DEBUG: sendMessage called with senderId=$senderId, receiverId=$receiverId');
+    if (senderId == receiverId) {
+      print('WARNING: senderId and receiverId are the same! Message not sent.');
+      _speak("Cannot send a message to yourself.");
+      return;
+    }
 
     final timestamp = Timestamp.now();
 

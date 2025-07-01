@@ -8,6 +8,8 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter/services.dart';
 import 'package:test1/chat_screen.dart';
 import 'package:test1/recent_chats.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -141,8 +143,17 @@ class _SignUpPageState extends State<SignUpPage> {
           });
 
           await speakAndWait("Fingerprint recognized. Welcome back.");
-          _navigateToChat();
-          return true;
+          print(
+              'DEBUG: Fingerprint recognized, about to call signInWithFingerprint');
+          bool success = await signInWithFingerprint(fingerprintId);
+          if (success) {
+            print('DEBUG: signInWithFingerprint succeeded, navigating to chat');
+            _navigateToChat();
+          } else {
+            print('DEBUG: signInWithFingerprint failed');
+            await speakAndWait('Login failed. Please try again.');
+          }
+          return success;
         } else {
           await speakAndWait("Fingerprint ID not available.");
           return false;
@@ -167,7 +178,7 @@ class _SignUpPageState extends State<SignUpPage> {
         _fingerprintVerified = false;
         _fingerprintFailed = true;
       });
-      await speakAndWait("Authentication failed: ${e.toString()}");
+      await speakAndWait("Authentication failed: [31m${e.toString()}[0m");
       return false;
     }
   }
@@ -321,5 +332,34 @@ class _SignUpPageState extends State<SignUpPage> {
         ),
       ),
     );
+  }
+}
+
+// Call this after fingerprint is recognized and you have fingerprintId
+Future<bool> signInWithFingerprint(String fingerprintId) async {
+  try {
+    print(
+        'DEBUG: Attempting fingerprint login with fingerprintId: $fingerprintId');
+    final response = await http.post(
+      Uri.parse(
+          'http://172.20.10.3:4000/getCustomToken'), // Use your Mac's correct local IP
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'fingerprintId': fingerprintId}),
+    );
+    print('DEBUG: Backend response status: ${response.statusCode}');
+    print('DEBUG: Backend response body: ${response.body}');
+    if (response.statusCode == 200) {
+      final token = jsonDecode(response.body)['token'];
+      await FirebaseAuth.instance.signInWithCustomToken(token);
+      print(
+          'DEBUG: Firebase currentUser UID: \x1B[32m${FirebaseAuth.instance.currentUser?.uid}\x1B[0m');
+      return true;
+    } else {
+      print('Login error: \x1B[31m${response.body}\x1B[0m');
+      return false;
+    }
+  } catch (e) {
+    print('Error during fingerprint login: $e');
+    return false;
   }
 }

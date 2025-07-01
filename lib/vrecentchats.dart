@@ -4,13 +4,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:test1/vChatscreen.dart';
 
+/// Recent Chats screen for volunteers.
+/// Shows all chats with blind users, last message, and allows opening chat screens.
 class VolunteerRecentChatsScreen extends StatefulWidget {
   @override
-  _VolunteerRecentChatsScreenState createState() =>
-      _VolunteerRecentChatsScreenState();
+  VolunteerRecentChatsScreenState createState() =>
+      VolunteerRecentChatsScreenState();
 }
 
-class _VolunteerRecentChatsScreenState
+class VolunteerRecentChatsScreenState
     extends State<VolunteerRecentChatsScreen> {
   String? volunteerId;
 
@@ -19,87 +21,72 @@ class _VolunteerRecentChatsScreenState
     super.initState();
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      setState(() {
-        volunteerId = user.uid; // ✅ use UID directly
-        print('Volunteer UID: $volunteerId');
-      });
-    } else {
-      print('User not logged in');
+      volunteerId = user.uid; // Use UID directly
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (FirebaseAuth.instance.currentUser == null) {
-      return Center(child: Text('Not logged in.'));
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return Scaffold(body: Center(child: Text('Not logged in.')));
     }
     if (volunteerId == null) {
-      return Center(child: CircularProgressIndicator());
+      return Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+
+    final volunteerChatsCollection = FirebaseFirestore.instance
+        .collection('volunteers')
+        .doc(volunteerId)
+        .collection('chats');
 
     return Scaffold(
       appBar: AppBar(title: Text('Recent Chats')),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('volunteers')
-            .doc(volunteerId)
-            .collection('chats')
-            .snapshots(),
+        stream: volunteerChatsCollection.snapshots(),
         builder: (context, chatSnapshot) {
           if (!chatSnapshot.hasData) {
             return Center(child: CircularProgressIndicator());
           }
-
           final chatDocs = chatSnapshot.data!.docs;
-
           if (chatDocs.isEmpty) {
             return Center(child: Text('No chats yet.'));
           }
-
           return ListView.builder(
             itemCount: chatDocs.length,
             itemBuilder: (context, index) {
-              final chatId = chatDocs[index].id;
-
+              final chatDoc = chatDocs[index];
+              final blindUserUid = chatDoc.id;
+              // Get last message for this chat
               return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('volunteers')
-                    .doc(volunteerId)
-                    .collection('chats')
-                    .doc(chatId)
+                stream: volunteerChatsCollection
+                    .doc(blindUserUid)
                     .collection('messages')
                     .orderBy('timestamp', descending: true)
                     .limit(1)
                     .snapshots(),
                 builder: (context, messageSnapshot) {
-                  if (!messageSnapshot.hasData) {
-                    return ListTile(
-                        title: Text(chatId), subtitle: Text("Loading..."));
+                  String lastMessage = "No messages yet";
+                  String timestamp = "--:--";
+                  if (messageSnapshot.hasData &&
+                      messageSnapshot.data!.docs.isNotEmpty) {
+                    final messageData = messageSnapshot.data!.docs.first.data()
+                        as Map<String, dynamic>;
+                    lastMessage = messageData['content'] ?? '';
+                    final timestampValue = messageData['timestamp'];
+                    timestamp = (timestampValue != null &&
+                            timestampValue is Timestamp)
+                        ? DateFormat('h:mm a').format(timestampValue.toDate())
+                        : "--:--";
                   }
-
-                  final messageDocs = messageSnapshot.data!.docs;
-
-                  if (messageDocs.isEmpty) {
-                    return ListTile(
-                      title: Text(chatId),
-                      subtitle: Text("No messages yet"),
-                    );
-                  }
-
-                  final messageData =
-                      messageDocs.first.data() as Map<String, dynamic>;
-                  final lastMessage = messageData['content'] ?? '';
-                  final timestamp =
-                      (messageData['timestamp'] as Timestamp).toDate();
-
-                  return StreamBuilder<DocumentSnapshot>(
-                    stream: FirebaseFirestore.instance
+                  // Get blind user's display name
+                  return FutureBuilder<DocumentSnapshot>(
+                    future: FirebaseFirestore.instance
                         .collection('Users')
-                        .doc(chatId)
-                        .snapshots(),
+                        .doc(blindUserUid)
+                        .get(),
                     builder: (context, userSnapshot) {
-                      String displayName = "Blind User"; // Default
-
+                      String displayName = "Blind User";
                       if (userSnapshot.hasData &&
                           userSnapshot.data != null &&
                           userSnapshot.data!.exists) {
@@ -110,26 +97,35 @@ class _VolunteerRecentChatsScreenState
                           displayName = data['username'];
                         }
                       }
-
-                      return ListTile(
-                        title: Text(displayName),
-                        subtitle: Text(
-                          lastMessage,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: Text(DateFormat('h:mm a').format(timestamp)),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => VolunteerChatScreen(
-                                receiverUid: chatId,
-                                displayName: displayName,
+                      return Card(
+                        margin:
+                            EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        elevation: 5,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.all(10),
+                          leading: CircleAvatar(
+                            backgroundColor: Color(0xff1370C2),
+                            child: Text(displayName[0].toUpperCase()),
+                          ),
+                          title: Text(displayName),
+                          subtitle: Text(
+                            lastMessage,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Text(timestamp),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => VolunteerChatScreen(
+                                  receiverUid: blindUserUid,
+                                  displayName: displayName,
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       );
                     },
                   );
