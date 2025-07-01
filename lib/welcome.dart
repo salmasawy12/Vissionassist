@@ -5,6 +5,7 @@ import 'package:carousel_slider/carousel_slider.dart' as cs;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:test1/privacyvol.dart';
 import 'privacy.dart';
 import 'package:flutter/services.dart';
 
@@ -86,7 +87,7 @@ class _StartscreenState extends State<Startscreen> {
     commandHandled = false; // reset here
     await flutterTts.stop();
     await flutterTts.speak(
-        "Hi, welcome to vision assist. Would you like to proceed to sign up? Please respond with proceed or cancel after opening the mic by pressing the volume up button.");
+        "Hi, welcome to Vision Assist! To get started, please press the volume up button to open the microphone. Then say 'volunteer' if you'd like to offer help, or 'visual support' if you need support.");
   }
 
   void _startListening() async {
@@ -140,15 +141,14 @@ class _StartscreenState extends State<Startscreen> {
       return;
     }
 
-    if (recognized.contains('proceed')) {
-      print('User said yes or proceed');
+    if (recognized.contains('volunteer')) {
+      print('user said volunteer');
       commandHandled = true;
       await speech.stop();
       await flutterTts.stop();
 
       // Start TTS
-      await flutterTts.speak(
-          "Proceeding to sign up. Moving forward, please make sure to open the mic before speaking.");
+      await flutterTts.speak("You have chosen to be a volunteer.");
 
       // 🟡 Wait until TTS actually starts (isTtsSpeaking = true)
       while (!isTtsSpeaking) {
@@ -163,16 +163,22 @@ class _StartscreenState extends State<Startscreen> {
       if (mounted) {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => PrivacyScreen()),
+          MaterialPageRoute(builder: (context) => PrivacyScreenvol()),
         );
       }
-    } else if (recognized.contains('cancel')) {
-      print('User said no');
+    } else if (recognized.contains('visual support')) {
+      print('User said visual assistance');
       commandHandled = true;
       await speech.stop();
       await flutterTts.stop();
       await flutterTts.speak(
-          "No problem, please take your time and switch the mic back on to say proceed when you are ready.");
+          "You have selected that you need visual assistance. Moving forward, please make sure to open the mic before speaking.");
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => PrivacyScreen()),
+        );
+      }
     } else {
       print('Unrecognized command: retry prompt');
       commandHandled = false; // allow reprocessing
@@ -201,7 +207,6 @@ class _StartscreenState extends State<Startscreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: ListView(
-        padding: EdgeInsets.only(bottom: 100),
         children: [
           SizedBox(height: 20),
           Image(
@@ -252,6 +257,41 @@ class _StartscreenState extends State<Startscreen> {
             ),
           ),
           SizedBox(height: 40),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22.0),
+            child: SizedBox(
+              height: 80,
+              child: ElevatedButton(
+                onPressed: () async {
+                  await flutterTts.stop();
+                  await speech.stop();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => PrivacyScreenvol()),
+                  );
+                },
+                child: Text(
+                  'Be a volunteer',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(0xff1370C2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16.0),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 10,
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 22.0),
             child: SizedBox(

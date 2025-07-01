@@ -12,10 +12,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+
+late IO.Socket socket;
 
 class ChatScreen extends StatefulWidget {
-  final String username;
-  ChatScreen({required this.username});
+  final String receiverUid;
+  final String receiverRole; // 'users' or 'volunteers'
+  final String displayName;
+
+  ChatScreen({
+    required this.receiverUid,
+    required this.receiverRole,
+    required this.displayName,
+  });
 
   @override
   _ChatScreenState createState() => _ChatScreenState();
@@ -38,6 +48,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    initSocket();
     _speech = stt.SpeechToText();
     _flutterTts.setLanguage("en-US");
     _flutterTts.setSpeechRate(0.5);
@@ -52,6 +63,67 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void initSocket() {
+    socket = IO.io(
+      'http://172.20.10.3:3000', // Replace with your local IP if testing on physical device
+      IO.OptionBuilder()
+          .setTransports(['websocket']) // for Flutter or Dart VM
+          .disableAutoConnect() // disable auto-connect so we call connect() manually
+          .build(),
+    );
+
+    socket.connect();
+
+    socket.onConnect((_) {
+      print('connected to socket server');
+    });
+
+    socket.on('receive_message', (data) async {
+      print('Message received: $data');
+
+      final message = {
+        'type': 'text',
+        'content': data['content'],
+        'isUser': false,
+        'timestamp': DateTime.now(),
+      };
+
+      setState(() {
+        messages.add(message);
+      });
+
+      // Optionally save to Firestore
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('Users')
+            .doc(user.uid)
+            .collection('chats')
+            .doc(data['senderId']) // sender is now the receiver
+            .collection('messages')
+            .add({
+          ...message,
+          'timestamp': Timestamp.now(),
+        });
+
+        await FirebaseFirestore.instance
+            .collection('Users')
+            .doc(user.uid)
+            .collection('chats')
+            .doc(data['senderId'])
+            .set({
+          'lastMessage': data['content'],
+          'timestamp': Timestamp.now(),
+          'receiverId': data['senderId'],
+        }, SetOptions(merge: true));
+      }
+
+      _speak("New message from ${data['senderId']}");
+    });
+
+    socket.onDisconnect((_) => print('disconnected from socket server'));
+  }
+
   void _loadMessages() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -60,7 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
         .collection('Users')
         .doc(user.uid)
         .collection('chats')
-        .doc(widget.username)
+        .doc(widget.receiverUid)
         .collection('messages')
         .orderBy('timestamp')
         .get();
@@ -84,16 +156,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    setState(() {
+      messageController.clear();
+    });
 
     final senderId = user.uid;
-    final receiverId =
-        widget.username; // assume this is receiver's user ID or unique username
+    final receiverId = widget.receiverUid;
+
+    final timestamp = Timestamp.now();
 
     final message = {
       'type': 'text',
       'content': text,
       'isUser': true,
-      'timestamp': Timestamp.now(),
+      'timestamp': timestamp,
       'senderId': senderId,
       'receiverId': receiverId,
     };
@@ -101,31 +177,51 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       messages.add(message);
     });
+    socket.emit('send_message', {
+      'senderId': senderId,
+      'receiverId': receiverId,
+      'content': text,
+    });
 
-    // Save to sender's chat collection
-    await FirebaseFirestore.instance
-        .collection('Users')
-        .doc(senderId)
+    // Determine sender and receiver collections
+    final senderCollection =
+        FirebaseFirestore.instance.collection('Users').doc(senderId);
+    final receiverCollection = FirebaseFirestore.instance
+        .collection(
+            widget.receiverRole == 'volunteers' ? 'volunteers' : 'Users')
+        .doc(receiverId);
+
+    // Save to sender's chat
+    await senderCollection
         .collection('chats')
         .doc(receiverId)
         .collection('messages')
         .add(message);
 
-    // Update last message metadata for sender
-    await FirebaseFirestore.instance
-        .collection('Users')
-        .doc(senderId)
-        .collection('chats')
-        .doc(receiverId)
-        .set({
+    await senderCollection.collection('chats').doc(receiverId).set({
       'lastMessage': text,
-      'timestamp': Timestamp.now(),
+      'timestamp': timestamp,
       'receiverId': receiverId,
+    }, SetOptions(merge: true));
+
+    // Save to receiver's chat
+    await receiverCollection
+        .collection('chats')
+        .doc(senderId)
+        .collection('messages')
+        .add({
+      ...message,
+      'isUser': false,
+    });
+
+    await receiverCollection.collection('chats').doc(senderId).set({
+      'lastMessage': text,
+      'timestamp': timestamp,
+      'receiverId': senderId,
     }, SetOptions(merge: true));
 
     _speak("Message sent.");
 
-    messageController.clear();
     _waitingForMessage = false;
   }
 
@@ -262,7 +358,7 @@ class _ChatScreenState extends State<ChatScreen> {
           .collection('Users')
           .doc(user.uid)
           .collection('chats')
-          .doc(widget.username)
+          .doc(widget.receiverUid)
           .collection('messages')
           .add(message);
 
@@ -270,7 +366,7 @@ class _ChatScreenState extends State<ChatScreen> {
           .collection('Users')
           .doc(user.uid)
           .collection('chats')
-          .doc(widget.username)
+          .doc(widget.receiverUid)
           .set({
         'lastMessage': "[Image]",
         'timestamp': Timestamp.now(),
@@ -286,7 +382,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Chat with ${widget.username}")),
+      appBar: AppBar(title: Text("Chat with ${widget.receiverUid}")),
       body: Column(
         children: [
           Expanded(
@@ -387,7 +483,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   backgroundColor: Color(0xff1370C2),
                   child: IconButton(
                     icon: Icon(Icons.send, color: Colors.white),
-                    onPressed: () => sendMessage(messageController.text),
+                    onPressed: () => sendMessage(messageController.text.trim()),
                   ),
                 ),
               ],

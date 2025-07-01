@@ -161,18 +161,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         .doc(user.uid)
         .collection('chats');
 
-    final chatDocs = await userChatsCollection.get();
+    // Step 1: Get all available volunteers
+    final availableVolunteersSnapshot = await FirebaseFirestore.instance
+        .collection('volunteers')
+        .where('available', isEqualTo: true)
+        .get();
 
-    print("Found ${chatDocs.docs.length} chats.");
+    final List<Map<String, String>> loadedChats = [];
 
-    List<Map<String, String>> loadedChats = [];
-
-    for (var doc in chatDocs.docs) {
-      final chatId = doc.id;
-      print("Loading chat with $chatId");
+    for (var doc in availableVolunteersSnapshot.docs) {
+      final volunteerUsername = doc['username'].toString();
 
       final messagesSnapshot = await userChatsCollection
-          .doc(chatId)
+          .doc(volunteerUsername)
           .collection('messages')
           .orderBy('timestamp', descending: true)
           .limit(1)
@@ -180,10 +181,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (messagesSnapshot.docs.isNotEmpty) {
         final messageData = messagesSnapshot.docs.first.data();
-        print("Last message in $chatId: ${messageData['content']}");
 
         loadedChats.add({
-          "name": chatId,
+          "name": volunteerUsername,
           "lastMessage": messageData['content'] ?? '',
           "timestamp": (messageData['timestamp'] as Timestamp)
               .toDate()
@@ -192,13 +192,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               .substring(11, 16),
         });
       } else {
-        print("No messages in chat $chatId");
+        // No messages yet with this volunteer
+        loadedChats.add({
+          "name": volunteerUsername,
+          "lastMessage": "No messages yet",
+          "timestamp": "--:--",
+        });
       }
     }
 
     setState(() {
       recentChats = loadedChats;
-      print("Recent chats set: $recentChats");
+      print("All available volunteers (with/without chat): $recentChats");
     });
   }
 
@@ -209,11 +214,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
-  void _speak(String text) async {
+  Future _speak(String text) async {
     _isResponding = true;
     await _flutterTts.speak(text);
-    await Future.delayed(Duration(seconds: 2));
-    _isResponding = false;
+    _isResponding = false; // Remove delay
   }
 
   void _startListening() async {
@@ -261,22 +265,83 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
   }
 
-  void _processVoiceInput() {
+  void _processVoiceInput() async {
     if (_voiceInput.isEmpty) {
       _speak("No command detected. Try again.");
       return;
     }
 
-    // Check if the voice command contains "open chat with"
     if (_voiceInput.contains("open chat with")) {
       String chatName = _voiceInput.replaceAll("open chat with", "").trim();
-      _openChat(chatName);
+
+      // Query volunteers collection to find the UID for this username
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('volunteers')
+          .where('username', isEqualTo: chatName)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final volunteerDoc = querySnapshot.docs.first;
+        final volunteerUid = volunteerDoc.id;
+
+        _openChat(volunteerUid, chatName);
+      } else {
+        _speak("Volunteer named $chatName not found.");
+      }
     } else {
       _speak("I didn't catch that. Please say 'open chat with [name]'.");
     }
   }
 
-  void _openChat(String chatName) async {
+  Future<List<Map<String, String>>> _loadVolunteersWithLastMessages(
+      String userId) async {
+    final availableVolunteersSnapshot = await FirebaseFirestore.instance
+        .collection('volunteers')
+        .where('available', isEqualTo: true)
+        .get();
+
+    final userChatsCollection = FirebaseFirestore.instance
+        .collection('Users')
+        .doc(userId)
+        .collection('chats');
+
+    List<Map<String, String>> loadedChats = [];
+
+    for (var doc in availableVolunteersSnapshot.docs) {
+      final volunteerUid = doc.id; // This is UID, the doc ID
+      final volunteerUsername = doc['username'].toString();
+
+      final messagesSnapshot = await userChatsCollection
+          .doc(volunteerUid) // Use UID here, NOT username
+          .collection('messages')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+      if (messagesSnapshot.docs.isNotEmpty) {
+        final messageData = messagesSnapshot.docs.first.data();
+        loadedChats.add({
+          "name": volunteerUsername,
+          "lastMessage": messageData['content'] ?? '',
+          "timestamp": (messageData['timestamp'] as Timestamp)
+              .toDate()
+              .toLocal()
+              .toString()
+              .substring(11, 16),
+        });
+      } else {
+        loadedChats.add({
+          "name": volunteerUsername,
+          "lastMessage": "No messages yet",
+          "timestamp": "--:--",
+        });
+      }
+    }
+
+    return loadedChats;
+  }
+
+  void _openChat(String volunteerUid, String volunteerUsername) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _speak("You must be logged in.");
@@ -288,36 +353,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         .doc(user.uid)
         .collection('chats');
 
-    final chatDocs = await userChatsCollection.get();
+    final chatDocRef = userChatsCollection.doc(volunteerUid); // Use UID here
 
-    bool chatFound = false;
+    final chatDocSnapshot = await chatDocRef.get();
 
-    for (var doc in chatDocs.docs) {
-      final docId = doc.id;
-      if (docId.toLowerCase() == chatName.toLowerCase()) {
-        _speak("Opening chat with $chatName");
-
-        // Stop listening after 5 seconds
-        Timer(Duration(seconds: 5), () {
-          _stopListening();
-        });
-
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatScreen(username: docId),
-          ),
-        );
-
-        chatFound = true;
-        break;
-      }
+    if (!chatDocSnapshot.exists) {
+      await chatDocRef.set({'createdAt': FieldValue.serverTimestamp()});
+      await chatDocRef.collection('messages').add({
+        'content': 'Chat started with $volunteerUsername.',
+        'sender': user.uid,
+        'receiver': volunteerUid,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
     }
 
-    if (!chatFound) {
-      _speak("Chat with $chatName not found.");
-      _stopListening();
-    }
+    /// ✅ Only speak after chat + message creation is done
+    _speak("Opening chat with $volunteerUsername");
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatScreen(
+          receiverUid: volunteerUid,
+          displayName: volunteerUsername,
+          receiverRole: 'volunteers',
+        ),
+      ),
+    );
   }
 
   @override
@@ -338,65 +400,103 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: Text('Recent Chats')),
       body: StreamBuilder<QuerySnapshot>(
-        stream: userChatsCollection.snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData)
+        stream: FirebaseFirestore.instance
+            .collection('Users')
+            .doc(FirebaseAuth.instance.currentUser!.uid)
+            .collection('chats')
+            .snapshots(), // Listen for real-time chat updates
+        builder: (context, chatSnapshot) {
+          if (!chatSnapshot.hasData) {
             return Center(child: CircularProgressIndicator());
-
-          final chatDocs = snapshot.data!.docs;
-
-          if (chatDocs.isEmpty) {
-            return Center(child: Text("No chats found."));
           }
 
-          return ListView.builder(
-            itemCount: chatDocs.length,
-            itemBuilder: (context, index) {
-              final chatDoc = chatDocs[index];
-              final chatId = chatDoc.id;
+          final chatDocs = chatSnapshot.data!.docs;
 
-              return StreamBuilder<QuerySnapshot>(
-                stream: userChatsCollection
-                    .doc(chatId)
-                    .collection('messages')
-                    .orderBy('timestamp', descending: true)
-                    .limit(1)
-                    .snapshots(),
-                builder: (context, messageSnapshot) {
-                  String lastMessage = "";
-                  String timestamp = "";
+          return FutureBuilder<QuerySnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('volunteers')
+                .where('available', isEqualTo: true)
+                .get(),
+            builder: (context, volunteerSnapshot) {
+              if (!volunteerSnapshot.hasData) {
+                return Center(child: CircularProgressIndicator());
+              }
 
-                  if (messageSnapshot.hasData &&
-                      messageSnapshot.data!.docs.isNotEmpty) {
-                    final messageData = messageSnapshot.data!.docs.first.data()
-                        as Map<String, dynamic>;
+              final volunteerDocs = volunteerSnapshot.data!.docs;
 
-                    lastMessage = messageData['content'] ?? '';
-                    timestamp = (messageData['timestamp'] as Timestamp)
-                        .toDate()
-                        .toLocal()
-                        .toString()
-                        .substring(11, 16);
-                  }
+// Map usernames → full volunteer data (to use later)
+              final Map<String, Map<String, dynamic>> usernameToVolunteer = {
+                for (var doc in volunteerDocs)
+                  doc['username']: doc.data() as Map<String, dynamic>
+              };
 
-                  return Card(
-                    margin:
-                        EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-                    elevation: 5,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.all(10),
-                      leading: CircleAvatar(
-                        backgroundColor: Color(0xff1370C2),
-                        child: Text(chatId[0].toUpperCase()),
-                      ),
-                      title: Text(chatId),
-                      subtitle: Text(lastMessage),
-                      trailing: Text(
-                        timestamp,
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                      onTap: () => _openChat(chatId),
-                    ),
+              final Map<String, String> uidToUsername = {
+                for (var doc in volunteerDocs) doc.id: doc['username'] as String
+              };
+
+              final filteredChats = chatDocs.where((doc) {
+                return usernameToVolunteer.containsKey(doc.id);
+              }).toList();
+
+              return ListView.builder(
+                itemCount: volunteerDocs.length,
+                itemBuilder: (context, index) {
+                  final volunteer = volunteerDocs[index];
+                  final volunteerUid = volunteer.id; // Use UID as chat doc id
+                  final volunteerUsername = volunteer['username'];
+
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('Users')
+                        .doc(FirebaseAuth.instance.currentUser!.uid)
+                        .collection('chats')
+                        .doc(
+                            volunteerUid) // <-- Use volunteerUid here, not username
+                        .collection('messages')
+                        .orderBy('timestamp', descending: true)
+                        .limit(1)
+                        .snapshots(),
+                    builder: (context, messageSnapshot) {
+                      String lastMessage = "No messages yet";
+                      String timestamp = "--:--";
+
+                      if (messageSnapshot.hasData &&
+                          messageSnapshot.data!.docs.isNotEmpty) {
+                        final messageData = messageSnapshot.data!.docs.first
+                            .data() as Map<String, dynamic>;
+                        lastMessage = messageData['content'] ?? '';
+                        final timestampValue = messageData['timestamp'];
+                        timestamp = (timestampValue != null &&
+                                timestampValue is Timestamp)
+                            ? timestampValue
+                                .toDate()
+                                .toLocal()
+                                .toString()
+                                .substring(11, 16)
+                            : "--:--";
+                      }
+
+                      return Card(
+                        margin:
+                            EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        elevation: 5,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.all(10),
+                          leading: CircleAvatar(
+                            backgroundColor: Color(0xff1370C2),
+                            child: Text(volunteerUsername[0].toUpperCase()),
+                          ),
+                          title: Text(volunteerUsername),
+                          subtitle: Text(lastMessage),
+                          trailing: Text(
+                            timestamp,
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          onTap: () => _openChat(volunteerUid,
+                              volunteerUsername), // Use UID here too
+                        ),
+                      );
+                    },
                   );
                 },
               );
