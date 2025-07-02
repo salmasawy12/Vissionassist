@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
+import android.provider.Settings
 
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -131,8 +132,16 @@ class MainActivity : FlutterFragmentActivity() {
         val secretKey = secretKeyEntry.secretKey
         val encoded = secretKey.encoded
 
-        return if (encoded != null) {
+        // Get ANDROID_ID for device uniqueness
+        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+
+        // Combine ANDROID_ID and fingerprint key for a unique ID per device+enrollment
+        return if (encoded != null && androidId != null) {
+            androidId + ":" + Base64.encodeToString(encoded, Base64.NO_WRAP)
+        } else if (encoded != null) {
             Base64.encodeToString(encoded, Base64.NO_WRAP)
+        } else if (androidId != null) {
+            androidId
         } else {
             "KEY:$KEY_NAME"
         }

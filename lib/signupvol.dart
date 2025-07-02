@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:test1/recent_chats.dart';
+import 'package:test1/vChatscreen.dart';
 import 'package:test1/vrecentchats.dart';
 
 class SignUpPagevol extends StatefulWidget {

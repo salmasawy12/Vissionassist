@@ -12,7 +12,8 @@ class PrivacyScreen extends StatefulWidget {
   _PrivacyScreenState createState() => _PrivacyScreenState();
 }
 
-class _PrivacyScreenState extends State<PrivacyScreen> {
+class _PrivacyScreenState extends State<PrivacyScreen>
+    with TickerProviderStateMixin {
   static const volumeChannel = MethodChannel('com.example.volume_button');
   late FlutterTts flutterTts;
   late stt.SpeechToText speech;
@@ -27,9 +28,41 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
   // Track if we asked "Are you sure you want to skip?" and wait confirmation
   bool waitingForSkipConfirmation = false;
 
+  // Animation controllers
+  late AnimationController _fadeController;
+  late AnimationController _slideController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
   @override
   void initState() {
     super.initState();
+
+    // Initialize animations
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _slideController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeIn,
+    ));
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
 
     flutterTts = FlutterTts();
     speech = stt.SpeechToText();
@@ -88,6 +121,14 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     });
 
     _speakPrivacyIntro();
+
+    // Start animations after initialization
+    Future.delayed(Duration(milliseconds: 100), () {
+      if (mounted) {
+        _fadeController.forward();
+        _slideController.forward();
+      }
+    });
   }
 
   final List<String> listItems = [
@@ -285,6 +326,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
 
   @override
   void dispose() {
+    _fadeController.dispose();
+    _slideController.dispose();
     flutterTts.stop();
     speech.stop();
     super.dispose();
@@ -293,122 +336,323 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        title: Image.asset(
-          'assets/images/definedlogo.png',
-          width: 150,
-          height: 80, // You might want to reduce height to fit nicely
-          fit: BoxFit.contain,
-        ),
-      ),
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 16),
-                    const Text(
-                      "Privacy and Terms",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: CustomScrollView(
+            slivers: [
+              // Custom App Bar
+              SliverAppBar(
+                expandedHeight: 80,
+                floating: false,
+                pinned: true,
+                backgroundColor: Colors.white,
+                elevation: 0,
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Container(
+                    color: Colors.white,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 20),
+                          Image.asset(
+                            'assets/images/definedlogo.png',
+                            width: 120,
+                            height: 60,
+                            fit: BoxFit.contain,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      "To use Vision Assist, you agree to the following:",
-                      style: TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 17),
-
-                    // List item 1
-                    _iconTextTile(
-                      icon: Icons.accessibility_new_rounded,
-                      text:
-                          "I will not use Vision Assist as a mobility device.",
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // List item 2
-                    _iconTextTile(
-                      icon: Icons.photo_camera,
-                      text:
-                          "Vision Assist can record, review, and share videos and images for safety, quality, and as further described in the Privacy Policy.",
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // List item 3
-                    _iconTextTile(
-                      icon: Icons.lock,
-                      text:
-                          "The data, videos, images, and personal information I submit to Vision Assist may be stored and processed in our database.",
-                    ),
-
-                    const SizedBox(height: 25),
-
-                    // Terms and Privacy buttons
-                    _linkButton(
-                      context,
-                      "Terms of Service",
-                      () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const TermsOfServiceScreen()),
-                        );
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ),
 
-              // Footer and button
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  children: [
-                    const Text(
-                      "By clicking 'I agree', I agree to everything above and accept the Terms of Service and Privacy Policy.",
-                      style: TextStyle(fontSize: 14),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          _goToSignUp();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(0xff1370C2),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+              // Main Content
+              SliverToBoxAdapter(
+                child: SlideTransition(
+                  position: _slideAnimation,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header Section
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1370C2).withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF1370C2).withOpacity(0.1),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1370C2)
+                                          .withOpacity(0.1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.privacy_tip,
+                                      color: const Color(0xFF1370C2),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Expanded(
+                                    child: Text(
+                                      "Privacy and Terms",
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1F2937),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                "To use Vision Assist, you agree to the following:",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        child: const Text(
-                          "I agree",
-                          style: TextStyle(
-                              fontSize: 18,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold),
+
+                        const SizedBox(height: 32),
+
+                        // Privacy Items
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              _enhancedIconTextTile(
+                                icon: Icons.accessibility_new_rounded,
+                                text:
+                                    "I will not use Vision Assist as a mobility device.",
+                                color: Colors.orange,
+                              ),
+                              const SizedBox(height: 20),
+                              _enhancedIconTextTile(
+                                icon: Icons.photo_camera,
+                                text:
+                                    "Vision Assist can record, review, and share videos and images for safety, quality, and as further described in the Privacy Policy.",
+                                color: Colors.blue,
+                              ),
+                              const SizedBox(height: 20),
+                              _enhancedIconTextTile(
+                                icon: Icons.lock,
+                                text:
+                                    "The data, videos, images, and personal information I submit to Vision Assist may be stored and processed in our database.",
+                                color: Colors.green,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+
+                        const SizedBox(height: 24),
+
+                        // Terms Link
+                        Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.grey[200]!,
+                            ),
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (context) =>
+                                          const TermsOfServiceScreen()),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.description,
+                                      color: const Color(0xFF1370C2),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    const Text(
+                                      "Terms of Service",
+                                      style: TextStyle(
+                                        color: Color(0xFF1370C2),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Icon(
+                                      Icons.open_in_new,
+                                      color: const Color(0xFF1370C2),
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        // Agreement Text
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1370C2).withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF1370C2).withOpacity(0.1),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                color: const Color(0xFF1370C2),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  "By clicking 'I agree', I agree to everything above and accept the Terms of Service and Privacy Policy.",
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: const Color(0xFF1370C2),
+                                    fontWeight: FontWeight.w500,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // Action Buttons
+                        Column(
+                          children: [
+                            // I Agree Button
+                            Container(
+                              width: double.infinity,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF1370C2)
+                                        .withOpacity(0.3),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  _goToSignUp();
+                                },
+                                icon: const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                                label: const Text(
+                                  "I Agree",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1370C2),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // Voice Command Help
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.grey[300]!,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.mic,
+                                    color: Colors.grey[600],
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      "Press volume up button and say 'read' or 'skip'",
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey[600],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 20),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -418,20 +662,32 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     );
   }
 
-  Widget _iconTextTile({required IconData icon, required String text}) {
+  Widget _enhancedIconTextTile(
+      {required IconData icon, required String text, required Color color}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CircleAvatar(
-          radius: 18,
-          backgroundColor: Colors.grey[200],
-          child: Icon(icon, color: Colors.black87, size: 20),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon,
+            color: color,
+            size: 22,
+          ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 16),
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 15),
+            style: TextStyle(
+              fontSize: 15,
+              color: Colors.grey[800],
+              height: 1.4,
+            ),
           ),
         ),
       ],

@@ -18,7 +18,7 @@ class SignUpPage extends StatefulWidget {
   State<SignUpPage> createState() => _SignUpPageState();
 }
 
-class _SignUpPageState extends State<SignUpPage> {
+class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
   static const platform = MethodChannel('com.example.volume_button');
   final MethodChannel _fingerprintChannel =
       MethodChannel('com.example.fingerprint');
@@ -32,12 +32,47 @@ class _SignUpPageState extends State<SignUpPage> {
   bool _isSpeaking = false;
   bool _fingerprintVerified = false;
   bool _fingerprintFailed = false;
+  bool _isLoading = false;
+
+  // Animation controllers
+  late AnimationController _pulseController;
+  late AnimationController _fadeController;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
     platform.setMethodCallHandler(_handleNativeCalls);
+
+    // Initialize animations
+    _pulseController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
+    _pulseAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.2,
+    ).animate(CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    ));
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeIn,
+    ));
+
+    _fadeController.forward();
     _initializeAll();
   }
 
@@ -121,6 +156,12 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 
   Future<bool> _authenticateFingerprint(String uid) async {
+    setState(() {
+      _isLoading = true;
+      _fingerprintVerified = false;
+      _fingerprintFailed = false;
+    });
+
     try {
       final authenticated =
           await _fingerprintChannel.invokeMethod('authenticateOnce');
@@ -140,7 +181,11 @@ class _SignUpPageState extends State<SignUpPage> {
           setState(() {
             _fingerprintVerified = true;
             _fingerprintFailed = false;
+            _isLoading = false;
           });
+
+          // Start pulse animation for success
+          _pulseController.repeat(reverse: true);
 
           await speakAndWait("Fingerprint recognized. Welcome back.");
           print(
@@ -156,6 +201,9 @@ class _SignUpPageState extends State<SignUpPage> {
           return success;
         } else {
           await speakAndWait("Fingerprint ID not available.");
+          setState(() {
+            _isLoading = false;
+          });
           return false;
         }
       } else {
@@ -168,17 +216,20 @@ class _SignUpPageState extends State<SignUpPage> {
         setState(() {
           _fingerprintVerified = false;
           _fingerprintFailed = true;
+          _isLoading = false;
         });
         await speakAndWait(
-            "Fingerprint not recognized. Say try again or sign up later.");
+            "Fingerprint not recognized. Say try again to authenticate.");
         return false;
       }
     } catch (e) {
       setState(() {
         _fingerprintVerified = false;
         _fingerprintFailed = true;
+        _isLoading = false;
       });
-      await speakAndWait("Authentication failed: [31m${e.toString()}[0m");
+      await speakAndWait(
+          "Authentication failed. Please make sure you have a fingerprint registered on your device. Would you like to try again?");
       return false;
     }
   }
@@ -191,17 +242,20 @@ class _SignUpPageState extends State<SignUpPage> {
         onResult: (result) async {
           if (result.finalResult) {
             final recognized = result.recognizedWords.toLowerCase().trim();
-            if (recognized.contains('sign up later')) {
+            if (recognized.contains('try again') ||
+                recognized.contains('yes')) {
               await _speech.stop();
               setState(() => _isListening = false);
-              await _onSignUpLater();
-            } else if (recognized.contains('try again')) {
-              await _speech.stop();
-              setState(() => _isListening = false);
+              await speakAndWait("Place your finger on the fingerprint sensor");
               await _authenticateFingerprint(_auth.currentUser!.uid);
+            } else if (recognized.contains('no')) {
+              await _speech.stop();
+              setState(() => _isListening = false);
+              await speakAndWait(
+                  "Authentication cancelled. You can try again later.");
             } else {
               await _handleUnknownCommand(
-                  "Sorry, I didn't understand that command.");
+                  "Please say 'yes' or 'try again' to retry, or 'no' to cancel.");
             }
           }
         },
@@ -237,22 +291,18 @@ class _SignUpPageState extends State<SignUpPage> {
     return completer.future;
   }
 
-  Future<void> _onSignUpLater() async {
-    await speakAndWait(
-        "You chose to sign up later. You can link your account from settings.");
-    _navigateToChat();
-  }
-
   void _navigateToChat() {
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => ChatDetailScreen()),
+      MaterialPageRoute(builder: (_) => RecentChatsScreen()),
     );
   }
 
   @override
   void dispose() {
+    _pulseController.dispose();
+    _fadeController.dispose();
     _tts.stop();
     _speech.stop();
     super.dispose();
@@ -261,77 +311,289 @@ class _SignUpPageState extends State<SignUpPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        title: Image.asset(
-          'assets/images/definedlogo.png',
-          width: 150,
-          height: 80,
-          fit: BoxFit.contain,
-        ),
-      ),
-      backgroundColor: Colors.white,
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: ListView(
-          children: [
-            const Text("You are signed in anonymously."),
-            const SizedBox(height: 20),
-            Center(
-              child: Column(
-                children: const [
-                  Icon(Icons.fingerprint, size: 80, color: Color(0xff1370C2)),
-                  SizedBox(height: 8),
-                  Text(
-                    "Place your thumb on the fingerprint sensor to authenticate",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16),
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: CustomScrollView(
+            slivers: [
+              // Custom App Bar
+              SliverAppBar(
+                expandedHeight: 80,
+                floating: false,
+                pinned: true,
+                backgroundColor: Colors.white,
+                elevation: 0,
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Container(
+                    color: Colors.white,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 20),
+                          Image.asset(
+                            'assets/images/definedlogo.png',
+                            width: 120,
+                            height: 60,
+                            fit: BoxFit.contain,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: _onSignUpLater,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff1370C2),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-                textStyle: const TextStyle(fontSize: 18),
+
+              // Main Content
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Welcome Section
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.03),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.verified_user,
+                              size: 32,
+                              color: const Color(0xFF1370C2),
+                            ),
+                            const SizedBox(width: 16),
+                            const Expanded(
+                              child: Text(
+                                "Welcome to VisionAssist",
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1F2937),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Fingerprint Section
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            // Animated Fingerprint Icon
+                            AnimatedBuilder(
+                              animation: _pulseAnimation,
+                              builder: (context, child) {
+                                return Transform.scale(
+                                  scale: _fingerprintVerified
+                                      ? _pulseAnimation.value
+                                      : 1.0,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(20),
+                                    decoration: BoxDecoration(
+                                      color: _getFingerprintIconColor()
+                                          .withOpacity(0.1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      _getFingerprintIcon(),
+                                      size: 64,
+                                      color: _getFingerprintIconColor(),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+
+                            const SizedBox(height: 20),
+
+                            // Status Text
+                            Text(
+                              _getStatusText(),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: _getStatusTextColor(),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            Text(
+                              _getInstructionText(),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                                height: 1.4,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+
+                            if (_isLoading) ...[
+                              const SizedBox(height: 20),
+                              const CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Color(0xFF1370C2)),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Action Buttons
+                      Column(
+                        children: [
+                          // Verify Fingerprint Button
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton.icon(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () => _authenticateFingerprint(
+                                      _auth.currentUser!.uid),
+                              icon: Icon(
+                                _fingerprintVerified
+                                    ? Icons.check_circle
+                                    : Icons.fingerprint,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                              label: Text(
+                                _fingerprintVerified
+                                    ? "Fingerprint Verified"
+                                    : "Verify Fingerprint",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _getFingerprintButtonColor(),
+                                foregroundColor: Colors.white,
+                                elevation: 2,
+                                shadowColor: _getFingerprintButtonColor()
+                                    .withOpacity(0.3),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Help Text
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1370C2).withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1370C2).withOpacity(0.1),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              color: const Color(0xFF1370C2),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                "Press volume up button to use voice commands",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: const Color(0xFF1370C2),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              child: const Text("Sign Up Later",
-                  style: TextStyle(color: Colors.white)),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: () => _authenticateFingerprint(_auth.currentUser!.uid),
-              icon: Icon(
-                _fingerprintVerified ? Icons.check_circle : Icons.fingerprint,
-                color: Colors.white,
-              ),
-              label: Text(
-                _fingerprintVerified
-                    ? "Fingerprint Verified"
-                    : "Verify Fingerprint",
-                style: const TextStyle(color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _fingerprintVerified
-                    ? Colors.green
-                    : (_fingerprintFailed
-                        ? Colors.red
-                        : const Color(0xff1370C2)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-                textStyle: const TextStyle(fontSize: 18),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  // Helper methods for UI state
+  Color _getFingerprintIconColor() {
+    if (_fingerprintVerified) return Colors.green;
+    if (_fingerprintFailed) return Colors.red;
+    return const Color(0xFF1370C2);
+  }
+
+  IconData _getFingerprintIcon() {
+    if (_fingerprintVerified) return Icons.check_circle;
+    if (_fingerprintFailed) return Icons.error;
+    return Icons.fingerprint;
+  }
+
+  String _getStatusText() {
+    if (_fingerprintVerified) return "Fingerprint Verified!";
+    if (_fingerprintFailed) return "Authentication Failed";
+    return "Ready to Authenticate";
+  }
+
+  Color _getStatusTextColor() {
+    if (_fingerprintVerified) return Colors.green;
+    if (_fingerprintFailed) return Colors.red;
+    return const Color(0xFF1F2937);
+  }
+
+  String _getInstructionText() {
+    if (_fingerprintVerified)
+      return "You can now proceed to chat with volunteers";
+    if (_fingerprintFailed)
+      return "Make sure you have a fingerprint registered on your device";
+    return "Place your thumb on the fingerprint sensor to identify yourself";
+  }
+
+  Color _getFingerprintButtonColor() {
+    if (_fingerprintVerified) return Colors.green;
+    if (_fingerprintFailed) return Colors.red;
+    return const Color(0xFF1370C2);
   }
 }
 
